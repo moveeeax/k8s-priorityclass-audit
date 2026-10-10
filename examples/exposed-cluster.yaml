@@ -1,0 +1,121 @@
+# A small cluster with every problem the auditor looks for:
+#   - one pod on a PriorityClass that was deleted (missing-priorityclass)
+#   - no globalDefault at all, so everything else sits on 0 (no-global-default)
+#   - a CNI DaemonSet at priority 0 under a batch job at 1000000
+#     (unprotected-critical)
+#
+# Run it with no cluster:
+#   k8s-priorityclass-audit --from-file examples/exposed-cluster.yaml
+---
+apiVersion: scheduling.k8s.io/v1
+kind: PriorityClass
+metadata:
+  name: ml-batch
+value: 1000000
+description: "Shipped by the ML team on a Friday."
+---
+apiVersion: v1
+kind: Node
+metadata:
+  name: node-1
+status:
+  allocatable:
+    cpu: "8"
+    memory: 32Gi
+---
+apiVersion: v1
+kind: Node
+metadata:
+  name: node-2
+status:
+  allocatable:
+    cpu: "8"
+    memory: 32Gi
+---
+apiVersion: v1
+kind: Pod
+metadata:
+  name: trainer-0
+  namespace: ml
+spec:
+  priorityClassName: ml-batch
+  nodeName: node-1
+  containers:
+    - name: trainer
+      image: ghcr.io/example/trainer:1.4
+      resources:
+        requests: {cpu: "4", memory: 16Gi}
+        limits: {cpu: "4", memory: 16Gi}
+status:
+  qosClass: Guaranteed
+---
+apiVersion: v1
+kind: Pod
+metadata:
+  name: cilium-agent-7fxk2
+  namespace: kube-system
+  ownerReferences:
+    - apiVersion: apps/v1
+      kind: DaemonSet
+      name: cilium
+      uid: "b1f0a4de-0000-4000-8000-000000000001"
+spec:
+  nodeName: node-1
+  containers:
+    - name: cilium-agent
+      image: quay.io/cilium/cilium:v1.16.3
+      resources:
+        requests: {cpu: 100m, memory: 512Mi}
+status:
+  qosClass: Burstable
+---
+apiVersion: v1
+kind: Pod
+metadata:
+  name: fluent-bit-99zqd
+  namespace: kube-system
+  ownerReferences:
+    - apiVersion: apps/v1
+      kind: DaemonSet
+      name: fluent-bit
+      uid: "b1f0a4de-0000-4000-8000-000000000002"
+spec:
+  nodeName: node-2
+  containers:
+    - name: fluent-bit
+      image: cr.fluentbit.io/fluent/fluent-bit:3.1.9
+status:
+  qosClass: BestEffort
+---
+apiVersion: v1
+kind: Pod
+metadata:
+  name: checkout-api-5d9c7b-2kk8l
+  namespace: shop
+spec:
+  priorityClassName: platform-tier  # deleted last quarter
+  nodeName: node-2
+  priority: 500
+  containers:
+    - name: api
+      image: ghcr.io/example/checkout:2.8.1
+      resources:
+        requests: {cpu: 500m, memory: 1Gi}
+        limits: {cpu: "1", memory: 1Gi}
+status:
+  qosClass: Burstable
+---
+apiVersion: v1
+kind: Pod
+metadata:
+  name: ingress-nginx-controller-6b4c9-wm2dr
+  namespace: ingress-nginx
+spec:
+  nodeName: node-2
+  containers:
+    - name: controller
+      image: registry.k8s.io/ingress-nginx/controller:v1.11.3
+      resources:
+        requests: {cpu: 200m, memory: 512Mi}
+status:
+  qosClass: Burstable

@@ -1,0 +1,80 @@
+# The same cluster after the fix: one globalDefault, a platform tier above the
+# batch tier, and the DaemonSets pinned to the platform tier.
+#
+#   k8s-priorityclass-audit --from-file examples/healthy-cluster.yaml \
+#     --critical-ns kube-system,ingress-nginx --fail-on any
+#
+# exits 0.
+---
+apiVersion: scheduling.k8s.io/v1
+kind: PriorityClass
+metadata:
+  name: workload-default
+value: 0
+globalDefault: true
+description: "What a pod gets when nobody thought about it."
+---
+apiVersion: scheduling.k8s.io/v1
+kind: PriorityClass
+metadata:
+  name: ml-batch
+value: 1000
+---
+apiVersion: scheduling.k8s.io/v1
+kind: PriorityClass
+metadata:
+  name: platform
+value: 100000
+description: "CNI, logging, ingress. Above anything a team can ship."
+---
+apiVersion: v1
+kind: Node
+metadata:
+  name: node-1
+---
+apiVersion: v1
+kind: Pod
+metadata:
+  name: trainer-0
+  namespace: ml
+spec:
+  priorityClassName: ml-batch
+  nodeName: node-1
+  containers:
+    - name: trainer
+      image: ghcr.io/example/trainer:1.4
+status:
+  qosClass: BestEffort
+---
+apiVersion: v1
+kind: Pod
+metadata:
+  name: cilium-agent-7fxk2
+  namespace: kube-system
+  ownerReferences:
+    - apiVersion: apps/v1
+      kind: DaemonSet
+      name: cilium
+      uid: "b1f0a4de-0000-4000-8000-000000000001"
+spec:
+  priorityClassName: platform
+  nodeName: node-1
+  containers:
+    - name: cilium-agent
+      image: quay.io/cilium/cilium:v1.16.3
+status:
+  qosClass: Burstable
+---
+apiVersion: v1
+kind: Pod
+metadata:
+  name: ingress-nginx-controller-6b4c9-wm2dr
+  namespace: ingress-nginx
+spec:
+  priorityClassName: platform
+  nodeName: node-1
+  containers:
+    - name: controller
+      image: registry.k8s.io/ingress-nginx/controller:v1.11.3
+status:
+  qosClass: Burstable

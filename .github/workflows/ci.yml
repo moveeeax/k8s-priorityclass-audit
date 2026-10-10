@@ -1,0 +1,64 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        go: ["1.22", "1.23", "1.24"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: ${{ matrix.go }}
+          cache: true
+      - name: gofmt
+        run: |
+          unformatted=$(gofmt -l .)
+          if [ -n "$unformatted" ]; then
+            echo "not gofmt-clean:"
+            echo "$unformatted"
+            exit 1
+          fi
+      - run: go vet ./...
+      - run: go build ./...
+      - run: go test -race ./...
+
+  examples:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.24"
+          cache: true
+      - run: go build -o k8s-priorityclass-audit ./cmd/k8s-priorityclass-audit
+      - name: exposed cluster reports findings and fails the gate
+        run: |
+          set +e
+          ./k8s-priorityclass-audit --from-file examples/exposed-cluster.yaml \
+            --critical-ns kube-system,ingress-nginx --fail-on any
+          code=$?
+          set -e
+          if [ "$code" -ne 1 ]; then
+            echo "expected exit 1, got $code"
+            exit 1
+          fi
+      - name: healthy cluster is clean
+        run: |
+          ./k8s-priorityclass-audit --from-file examples/healthy-cluster.yaml \
+            --critical-ns kube-system,ingress-nginx --fail-on any
+      - name: json output is valid
+        run: |
+          ./k8s-priorityclass-audit --from-file examples/exposed-cluster.yaml --format json | jq -e '.findings | length > 0'

@@ -1,0 +1,12 @@
+# Built binary at the repo root only. A bare pattern would also match the
+# cmd/k8s-priorityclass-audit/ source directory and silently drop main.go.
+/k8s-priorityclass-audit
+/dist/
+/coverage.out
+/*.exe
+
+# Never drop fixtures.
+!examples/**
+!testdata/**
+
+.DS_Store
