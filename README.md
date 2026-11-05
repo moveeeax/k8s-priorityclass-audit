@@ -1,7 +1,7 @@
 # k8s-priorityclass-audit
 
 [![ci](https://github.com/moveeeax/k8s-priorityclass-audit/actions/workflows/ci.yml/badge.svg)](https://github.com/moveeeax/k8s-priorityclass-audit/actions/workflows/ci.yml)
-[![go](https://img.shields.io/badge/go-1.22%2B-00ADD8?logo=go&logoColor=white)](https://go.dev)
+[![go](https://img.shields.io/badge/go-1.26%2B-00ADD8?logo=go&logoColor=white)](https://go.dev)
 [![license](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
 `kubectl get priorityclass` tells you which classes exist. It does not tell you who is
@@ -18,6 +18,8 @@ Three failures it catches:
    team's batch job — your CNI agent, your log shipper, your ingress controller.
 
 ## Install
+
+Requires Go 1.26 or newer (CI tests 1.26 and 1.27).
 
 ```sh
 go install github.com/moveeeax/k8s-priorityclass-audit/cmd/k8s-priorityclass-audit@latest

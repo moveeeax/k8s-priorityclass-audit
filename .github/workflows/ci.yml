@@ -10,19 +10,32 @@ on:
 permissions:
   contents: read
 
+env:
+  # Use exactly the Go that setup-go installed. Without this, a go directive
+  # newer than the runner's Go makes the toolchain auto-switch, and every
+  # matrix cell silently builds with the same version.
+  GOTOOLCHAIN: local
+
 jobs:
   test:
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
       matrix:
-        go: ["1.22", "1.23", "1.24"]
+        go: ["1.26", "1.27"]
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
         with:
           go-version: ${{ matrix.go }}
           cache: true
+      - name: go toolchain matches the matrix
+        run: |
+          go version
+          case "$(go env GOVERSION)" in
+            go${{ matrix.go }}|go${{ matrix.go }}.*) ;;
+            *) echo "expected go${{ matrix.go }}, got $(go env GOVERSION)"; exit 1 ;;
+          esac
       - name: gofmt
         run: |
           unformatted=$(gofmt -l .)
@@ -38,10 +51,10 @@ jobs:
   examples:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
         with:
-          go-version: "1.24"
+          go-version: "1.27"
           cache: true
       - run: go build -o k8s-priorityclass-audit ./cmd/k8s-priorityclass-audit
       - name: exposed cluster reports findings and fails the gate
