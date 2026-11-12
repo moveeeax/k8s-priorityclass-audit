@@ -20,11 +20,21 @@ func pc(name string, value int32, globalDefault bool) schedulingv1.PriorityClass
 	}
 }
 
+func pcNever(name string, value int32) schedulingv1.PriorityClass {
+	c := pc(name, value, false)
+	never := corev1.PreemptNever
+	c.PreemptionPolicy = &never
+	return c
+}
+
 type podOpt func(*corev1.Pod)
 
 func withClass(name string) podOpt { return func(p *corev1.Pod) { p.Spec.PriorityClassName = name } }
 func withPriority(v int32) podOpt  { return func(p *corev1.Pod) { p.Spec.Priority = &v } }
-func onNode(n string) podOpt       { return func(p *corev1.Pod) { p.Spec.NodeName = n } }
+func withPreemption(v corev1.PreemptionPolicy) podOpt {
+	return func(p *corev1.Pod) { p.Spec.PreemptionPolicy = &v }
+}
+func onNode(n string) podOpt { return func(p *corev1.Pod) { p.Spec.NodeName = n } }
 func withQOS(q corev1.PodQOSClass) podOpt {
 	return func(p *corev1.Pod) { p.Status.QOSClass = q }
 }
@@ -207,6 +217,78 @@ func TestRules(t *testing.T) {
 				},
 			},
 			want: map[string]int{},
+		},
+		{
+			name: "a non-preempting batch class above a daemonset is low, not high",
+			in: Input{
+				PriorityClasses: []schedulingv1.PriorityClass{pcNever("batch", 1000), pc("base", 0, true)},
+				Pods: []corev1.Pod{
+					pod("kube-system", "cni-agent-xyz", ownedByDaemonSet("cni-agent")),
+					pod("team-a", "big-batch-1", withClass("batch")),
+				},
+			},
+			want: map[string]int{RuleOutrankedNonPreempting: 1},
+			check: func(t *testing.T, rep *Report) {
+				f := findingsFor(rep, RuleOutrankedNonPreempting)[0]
+				if f.Severity != SeverityLow || f.Pod != "cni-agent-xyz" {
+					t.Fatalf("finding = %+v", f)
+				}
+				if !strings.Contains(f.Message, "big-batch-1") || !strings.Contains(f.Message, "Never") {
+					t.Fatalf("message must name the workload and the policy: %q", f.Message)
+				}
+			},
+		},
+		{
+			name: "the aggressor is the highest preempting workload, not the highest overall",
+			in: Input{
+				PriorityClasses: []schedulingv1.PriorityClass{pcNever("batch", 5000), pc("web", 1000, false), pc("base", 0, true)},
+				Pods: []corev1.Pod{
+					pod("kube-system", "cni-agent-xyz", ownedByDaemonSet("cni-agent")),
+					pod("team-a", "big-batch-1", withClass("batch")),
+					pod("team-b", "web-1", withClass("web")),
+				},
+			},
+			want: map[string]int{RuleUnprotectedCritical: 1},
+			check: func(t *testing.T, rep *Report) {
+				msg := findingsFor(rep, RuleUnprotectedCritical)[0].Message
+				if !strings.Contains(msg, "web-1") || strings.Contains(msg, "big-batch-1") {
+					t.Fatalf("aggressor must be the preempting web-1: %q", msg)
+				}
+			},
+		},
+		{
+			name: "a critical pod between a preempting and a non-preempting workload is low",
+			in: Input{
+				PriorityClasses: []schedulingv1.PriorityClass{pcNever("batch", 5000), pc("web", 1000, false), pc("platform", 2000, false), pc("base", 0, true)},
+				Pods: []corev1.Pod{
+					pod("kube-system", "cni-agent-xyz", ownedByDaemonSet("cni-agent"), withClass("platform")),
+					pod("team-a", "big-batch-1", withClass("batch")),
+					pod("team-b", "web-1", withClass("web")),
+				},
+			},
+			want: map[string]int{RuleOutrankedNonPreempting: 1},
+		},
+		{
+			name: "equal priority with a non-preempting workload is not a finding",
+			in: Input{
+				PriorityClasses: []schedulingv1.PriorityClass{pcNever("batch", 1000), pc("platform", 1000, false), pc("base", 0, true)},
+				Pods: []corev1.Pod{
+					pod("kube-system", "cni-agent-xyz", ownedByDaemonSet("cni-agent"), withClass("platform")),
+					pod("team-a", "big-batch-1", withClass("batch")),
+				},
+			},
+			want: map[string]int{},
+		},
+		{
+			name: "the pod's stamped preemptionPolicy wins over the class",
+			in: Input{
+				PriorityClasses: []schedulingv1.PriorityClass{pc("batch", 1000, false), pc("base", 0, true)},
+				Pods: []corev1.Pod{
+					pod("kube-system", "cni-agent-xyz", ownedByDaemonSet("cni-agent")),
+					pod("team-a", "big-batch-1", withClass("batch"), withPreemption(corev1.PreemptNever)),
+				},
+			},
+			want: map[string]int{RuleOutrankedNonPreempting: 1},
 		},
 		{
 			name: "system-critical workloads do not count as the preempting workload",
@@ -392,5 +474,47 @@ func TestWriteTextTruncatesLadder(t *testing.T) {
 	}
 	if !strings.Contains(buf.String(), "7 more") {
 		t.Fatalf("expected a truncation note:\n%s", buf.String())
+	}
+}
+
+func TestPreemptingIsResolvedPerPod(t *testing.T) {
+	rep := Run(Input{
+		PriorityClasses: []schedulingv1.PriorityClass{pcNever("batch", 1000), pc("web", 500, true)},
+		Pods: []corev1.Pod{
+			pod("a", "batch-1", withClass("batch")),
+			pod("a", "web-1", withClass("web")),
+			pod("a", "plain-1"),
+			pod("a", "stamped-1", withPreemption(corev1.PreemptLowerPriority), withClass("batch")),
+		},
+	})
+	want := map[string]bool{"batch-1": false, "web-1": true, "plain-1": true, "stamped-1": true}
+	for _, p := range rep.Ladder {
+		if p.Preempting != want[p.Pod] {
+			t.Errorf("%s: preempting = %v, want %v", p.Pod, p.Preempting, want[p.Pod])
+		}
+	}
+}
+
+func TestWriteTextMarksPreemptingPods(t *testing.T) {
+	rep := Run(Input{
+		PriorityClasses: []schedulingv1.PriorityClass{pcNever("batch", 1000), pc("web", 500, true)},
+		Pods: []corev1.Pod{
+			pod("a", "batch-1", withClass("batch")),
+			pod("a", "web-1", withClass("web")),
+		},
+	})
+	var buf bytes.Buffer
+	if err := WriteText(&buf, rep, 0); err != nil {
+		t.Fatal(err)
+	}
+	rows := map[string]string{}
+	for _, line := range strings.Split(buf.String(), "\n") {
+		fields := strings.Fields(line)
+		if len(fields) >= 3 && strings.HasPrefix(fields[2], "a/") {
+			rows[fields[2]] = fields[1]
+		}
+	}
+	if rows["a/batch-1"] != "-" || rows["a/web-1"] != "P" {
+		t.Fatalf("P column = %v:\n%s", rows, buf.String())
 	}
 }

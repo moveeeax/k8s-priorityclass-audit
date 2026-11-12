@@ -63,6 +63,7 @@ func Run(in Input) *Report {
 			Priority:      prio,
 			QOS:           string(qosOf(pod)),
 			Critical:      isCritical(pod, critNS),
+			Preempting:    preempts(pod, byName),
 			Source:        source,
 		}
 		ladder = append(ladder, entry)
@@ -156,6 +157,21 @@ func resolve(pod *corev1.Pod, byName map[string]schedulingv1.PriorityClass, defa
 	return 0, "none"
 }
 
+// preempts reports whether the pod may evict lower-priority pods. The
+// scheduler reads spec.preemptionPolicy, which the Priority admission
+// controller copies from the class; the class is the fallback for objects that
+// never went through admission (fixtures, hand-written manifests). Unset means
+// PreemptLowerPriority.
+func preempts(pod *corev1.Pod, byName map[string]schedulingv1.PriorityClass) bool {
+	policy := pod.Spec.PreemptionPolicy
+	if policy == nil {
+		if pc, ok := byName[pod.Spec.PriorityClassName]; ok {
+			policy = pc.PreemptionPolicy
+		}
+	}
+	return policy == nil || *policy != corev1.PreemptNever
+}
+
 // systemClassValue returns the well-known values of the two built-in classes.
 func systemClassValue(name string) int32 {
 	switch name {
@@ -169,41 +185,65 @@ func systemClassValue(name string) int32 {
 }
 
 // unprotectedCritical flags critical pods that an ordinary workload is allowed
-// to preempt. "Ordinary" means: not critical, not on a system-* class.
+// to preempt. "Ordinary" means: not critical, not on a system-* class. Only
+// workloads that preempt count as the aggressor; a critical pod outranked only
+// by preemptionPolicy=Never workloads gets a low-severity finding instead,
+// because those pods are scheduled ahead of it but never evict it.
 func unprotectedCritical(ladder []PodPriority) []Finding {
-	var topPrio int32
-	var topPod *PodPriority
+	var topPrio, quietPrio int32
+	var topPod, quietPod *PodPriority
 	for i := range ladder {
 		p := &ladder[i]
 		if p.Critical || strings.HasPrefix(p.PriorityClass, systemClassPrefix) {
+			continue
+		}
+		if !p.Preempting {
+			if quietPod == nil || p.Priority > quietPrio {
+				quietPrio, quietPod = p.Priority, p
+			}
 			continue
 		}
 		if topPod == nil || p.Priority > topPrio {
 			topPrio, topPod = p.Priority, p
 		}
 	}
-	if topPod == nil || topPrio <= 0 {
+	if topPod != nil && topPrio <= 0 {
 		// Nothing can preempt anything: equal priority does not preempt.
-		return nil
+		topPod = nil
 	}
 
 	var out []Finding
 	for i := range ladder {
 		p := &ladder[i]
-		if !p.Critical || p.Priority > topPrio {
+		if !p.Critical {
 			continue
 		}
-		out = append(out, Finding{
-			Rule:          RuleUnprotectedCritical,
-			Severity:      SeverityHigh,
-			Namespace:     p.Namespace,
-			Pod:           p.Pod,
-			Node:          p.Node,
-			PriorityClass: p.PriorityClass,
-			Priority:      ptr(p.Priority),
-			Message: fmt.Sprintf("critical pod %s/%s runs at priority %d, at or below workload %s/%s at priority %d (class %s), which may preempt it",
-				p.Namespace, p.Pod, p.Priority, topPod.Namespace, topPod.Pod, topPrio, classOrNone(topPod.PriorityClass)),
-		})
+		switch {
+		case topPod != nil && p.Priority <= topPrio:
+			out = append(out, Finding{
+				Rule:          RuleUnprotectedCritical,
+				Severity:      SeverityHigh,
+				Namespace:     p.Namespace,
+				Pod:           p.Pod,
+				Node:          p.Node,
+				PriorityClass: p.PriorityClass,
+				Priority:      ptr(p.Priority),
+				Message: fmt.Sprintf("critical pod %s/%s runs at priority %d, at or below workload %s/%s at priority %d (class %s), which may preempt it",
+					p.Namespace, p.Pod, p.Priority, topPod.Namespace, topPod.Pod, topPrio, classOrNone(topPod.PriorityClass)),
+			})
+		case quietPod != nil && p.Priority < quietPrio:
+			out = append(out, Finding{
+				Rule:          RuleOutrankedNonPreempting,
+				Severity:      SeverityLow,
+				Namespace:     p.Namespace,
+				Pod:           p.Pod,
+				Node:          p.Node,
+				PriorityClass: p.PriorityClass,
+				Priority:      ptr(p.Priority),
+				Message: fmt.Sprintf("critical pod %s/%s runs at priority %d, below workload %s/%s at priority %d (class %s); that class has preemptionPolicy Never, so it is scheduled first but cannot evict the critical pod",
+					p.Namespace, p.Pod, p.Priority, quietPod.Namespace, quietPod.Pod, quietPrio, classOrNone(quietPod.PriorityClass)),
+			})
+		}
 	}
 	return out
 }

@@ -15,6 +15,7 @@ const (
 	RuleNoGlobalDefault        = "no-global-default"
 	RuleMultipleGlobalDefaults = "multiple-global-defaults"
 	RuleUnprotectedCritical    = "unprotected-critical"
+	RuleOutrankedNonPreempting = "outranked-non-preempting"
 )
 
 // AllRules is every rule the auditor can emit, in report order.
@@ -23,6 +24,7 @@ var AllRules = []string{
 	RuleNoGlobalDefault,
 	RuleMultipleGlobalDefaults,
 	RuleUnprotectedCritical,
+	RuleOutrankedNonPreempting,
 }
 
 // Severity levels, highest first.
@@ -64,6 +66,9 @@ type PodPriority struct {
 	Priority      int32  `json:"priority"`
 	QOS           string `json:"qos"`
 	Critical      bool   `json:"critical"`
+	// Preempting is false when the pod's preemptionPolicy is Never: it is
+	// queued ahead of lower-priority pods but never evicts them.
+	Preempting bool `json:"preempting"`
 	// Source records how the priority was resolved: "pod-spec", "class",
 	// "global-default", "none" or "missing-class".
 	Source string `json:"source"`
