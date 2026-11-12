@@ -6,6 +6,15 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Changed
+
+- `unprotected-critical` ignores workloads whose `preemptionPolicy` is `Never`
+  when picking the aggressor: they cannot evict anyone. A critical pod outranked
+  only by such workloads gets the new low-severity `outranked-non-preempting`
+  finding instead of a high one.
+- The text ladder has a `P` column (`P` may preempt, `-` is `Never`), and JSON
+  ladder entries carry `preempting`.
+
 ## [0.2.0]
 
 ### Security

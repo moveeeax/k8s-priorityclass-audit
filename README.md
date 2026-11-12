@@ -45,12 +45,12 @@ NAME      VALUE    GLOBAL-DEFAULT  PODS  PREEMPTION
 ml-batch  1000000  no              1     PreemptLowerPriority
 
 PRIORITY LADDER (5 pods)
-PRIORITY  NAMESPACE/POD                                       CLASS          QOS         CRITICAL  SOURCE
-1000000   ml/trainer-0                                        ml-batch       Guaranteed  no        class
-500       shop/checkout-api-5d9c7b-2kk8l                      platform-tier  Burstable   no        missing-class
-0         ingress-nginx/ingress-nginx-controller-6b4c9-wm2dr  <none>         Burstable   yes       none
-0         kube-system/cilium-agent-7fxk2                      <none>         Burstable   yes       none
-0         kube-system/fluent-bit-99zqd                        <none>         BestEffort  yes       none
+PRIORITY  P  NAMESPACE/POD                                       CLASS          QOS         CRITICAL  SOURCE
+1000000   P  ml/trainer-0                                        ml-batch       Guaranteed  no        class
+500       P  shop/checkout-api-5d9c7b-2kk8l                      platform-tier  Burstable   no        missing-class
+0         P  ingress-nginx/ingress-nginx-controller-6b4c9-wm2dr  <none>         Burstable   yes       none
+0         P  kube-system/cilium-agent-7fxk2                      <none>         Burstable   yes       none
+0         P  kube-system/fluent-bit-99zqd                        <none>         BestEffort  yes       none
 
 PREEMPTION ORDER (first victim first)
 node-1  kube-system/cilium-agent-7fxk2(0,Bu) -> ml/trainer-0(1000000,G)
@@ -90,11 +90,21 @@ name in `--fail-on` is an error, not a silent pass.
 | `missing-priorityclass` | high | a pod's `spec.priorityClassName` is not a class in the cluster |
 | `no-global-default` | medium | no class has `globalDefault: true` (once per cluster) |
 | `multiple-global-defaults` | high | more than one class has `globalDefault: true` (once per cluster) |
-| `unprotected-critical` | high | a critical pod is at or below the highest ordinary workload |
+| `unprotected-critical` | high | a critical pod is at or below the highest ordinary workload that may preempt |
+| `outranked-non-preempting` | low | a critical pod is below an ordinary workload with `preemptionPolicy: Never` and not exposed to any preempting one |
 
 Critical means: owned by a DaemonSet, or in a namespace passed to `--critical-ns`
 (default `kube-system`). Ordinary means everything else that is not on a `system-*`
 class — the control plane's own classes never count as the aggressor.
+
+Only workloads that may preempt count for `unprotected-critical`. A pod with
+`preemptionPolicy: Never` is queued ahead of lower-priority pods but never evicts them,
+so a critical pod outranked only by such pods gets the low-severity
+`outranked-non-preempting` finding instead. The policy is read from the pod's
+`spec.preemptionPolicy` (the Priority admission controller copies it from the class), and
+from the class when the pod has none, as in hand-written fixtures. Unset means
+`PreemptLowerPriority`. In the text ladder the `P` column shows `P` for pods that may
+preempt and `-` for `Never`; JSON carries the same as `preempting`.
 
 ## How it works
 

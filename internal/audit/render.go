@@ -35,14 +35,14 @@ func WriteText(w io.Writer, rep *Report, maxLadder int) error {
 	fmt.Fprintln(tw)
 
 	fmt.Fprintf(tw, "PRIORITY LADDER (%d pods)\n", len(rep.Ladder))
-	fmt.Fprintln(tw, "PRIORITY\tNAMESPACE/POD\tCLASS\tQOS\tCRITICAL\tSOURCE")
+	fmt.Fprintln(tw, "PRIORITY\tP\tNAMESPACE/POD\tCLASS\tQOS\tCRITICAL\tSOURCE")
 	shown := rep.Ladder
 	if maxLadder > 0 && len(shown) > maxLadder {
 		shown = shown[:maxLadder]
 	}
 	for _, p := range shown {
-		fmt.Fprintf(tw, "%d\t%s/%s\t%s\t%s\t%s\t%s\n",
-			p.Priority, p.Namespace, p.Pod, classOrNone(p.PriorityClass), p.QOS, yesNo(p.Critical), p.Source)
+		fmt.Fprintf(tw, "%d\t%s\t%s/%s\t%s\t%s\t%s\t%s\n",
+			p.Priority, preemptMark(p.Preempting), p.Namespace, p.Pod, classOrNone(p.PriorityClass), p.QOS, yesNo(p.Critical), p.Source)
 	}
 	if len(shown) < len(rep.Ladder) {
 		fmt.Fprintf(tw, "... %d more (use --format json for all)\n", len(rep.Ladder)-len(shown))
@@ -80,6 +80,15 @@ func WriteText(w io.Writer, rep *Report, maxLadder int) error {
 		fmt.Fprintf(tw, "summary\t%s\n", strings.Join(counts, " "))
 	}
 	return tw.Flush()
+}
+
+// preemptMark is the ladder's P column: "P" for pods that may preempt, "-"
+// for preemptionPolicy=Never.
+func preemptMark(preempting bool) string {
+	if preempting {
+		return "P"
+	}
+	return "-"
 }
 
 func yesNo(b bool) string {
