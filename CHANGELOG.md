@@ -4,7 +4,7 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project uses
 [Semantic Versioning](https://semver.org/).
 
-## [Unreleased]
+## [0.3.0] - 2026-11-12
 
 ### Changed
 
@@ -39,6 +39,6 @@ All notable changes to this project are documented here. The format follows
   `missing-priorityclass`, `no-global-default`, `multiple-global-defaults` and
   `unprotected-critical` rules.
 
-[Unreleased]: https://github.com/moveeeax/k8s-priorityclass-audit/compare/v0.2.0...HEAD
+[0.3.0]: https://github.com/moveeeax/k8s-priorityclass-audit/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/moveeeax/k8s-priorityclass-audit/compare/v0.1.0...v0.2.0
-[0.1.0]: https://github.com/moveeeax/k8s-priorityclass-audit/tree/v0.1.0
+[0.1.0]: https://github.com/moveeeax/k8s-priorityclass-audit/releases/tag/v0.1.0
